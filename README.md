@@ -1,5 +1,7 @@
 # gh-image
 
+![banner](https://github.com/user-attachments/assets/92463e67-b897-4212-91b4-a4f9b80ec4d4)
+
 A `gh` CLI extension that uploads images to GitHub from the command line.
 
 GitHub has no public API for image uploads — the web UI uses an internal endpoint that produces URLs scoped to a repository's visibility. This tool replicates that flow, so images on private repos stay private.
