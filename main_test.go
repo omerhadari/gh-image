@@ -1,9 +1,10 @@
 package main
 
 import (
-	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/drogers0/gh-image/internal/upload"
 )
 
 // TestCookieFromValue_BasicAttributes verifies the cookie has the expected fields.
@@ -59,7 +60,7 @@ func TestCookieFromValue_RejectsEmpty(t *testing.T) {
 
 // TestResolveSessionCookie_FlagPriority verifies --token flag takes highest priority.
 func TestResolveSessionCookie_FlagPriority(t *testing.T) {
-	t.Setenv("GH_IMAGE_TOKEN", "env_token")
+	t.Setenv("GH_SESSION_TOKEN", "env_token")
 	cookie, err := resolveSessionCookie("flag_token")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -69,9 +70,9 @@ func TestResolveSessionCookie_FlagPriority(t *testing.T) {
 	}
 }
 
-// TestResolveSessionCookie_EnvFallback verifies GH_IMAGE_TOKEN is used when no flag.
+// TestResolveSessionCookie_EnvFallback verifies GH_SESSION_TOKEN is used when no flag.
 func TestResolveSessionCookie_EnvFallback(t *testing.T) {
-	t.Setenv("GH_IMAGE_TOKEN", "env_token_value")
+	t.Setenv("GH_SESSION_TOKEN", "env_token_value")
 	cookie, err := resolveSessionCookie("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -85,7 +86,7 @@ func TestResolveSessionCookie_EnvFallback(t *testing.T) {
 func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
 	// No flag, no env var: should fall through to browser extraction which
 	// will fail in CI (no browser). Confirm the error message contains guidance.
-	t.Setenv("GH_IMAGE_TOKEN", "")
+	t.Setenv("GH_SESSION_TOKEN", "")
 	_, err := resolveSessionCookie("")
 	if err == nil {
 		// Only expected to fail when not in a browser environment
@@ -97,12 +98,90 @@ func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
 }
 
 // TestCookieFromValue_UsableByNewClient verifies the cookie produced by
-// cookieFromValue can be passed to upload.NewClient without panicking.
+// cookieFromValue can be passed to upload.NewClient.
 func TestCookieFromValue_UsableByNewClient(t *testing.T) {
 	cookie, err := cookieFromValue("testtoken")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Verify it's an *http.Cookie (type assertion sanity check).
-	var _ *http.Cookie = cookie
+	client := upload.NewClient(cookie)
+	if client == nil {
+		t.Fatal("expected upload.NewClient to return a non-nil client")
+	}
+}
+
+func TestClassifySubcommand(t *testing.T) {
+	tests := []struct {
+		name                    string
+		imagePaths              []string
+		firstPosAfterDoubleDash bool
+		tokenFlag               string
+		wantSubcommand          string
+		wantErrContains         string
+	}{
+		{
+			name:           "extract-token selected",
+			imagePaths:     []string{"extract-token"},
+			wantSubcommand: "extract-token",
+		},
+		{
+			name:           "check-token selected",
+			imagePaths:     []string{"check-token"},
+			wantSubcommand: "check-token",
+		},
+		{
+			name:                    "double-dash treats check-token as filename",
+			imagePaths:              []string{"check-token"},
+			firstPosAfterDoubleDash: true,
+			wantSubcommand:          "",
+		},
+		{
+			name:                    "double-dash treats extract-token as filename",
+			imagePaths:              []string{"extract-token"},
+			firstPosAfterDoubleDash: true,
+			wantSubcommand:          "",
+		},
+		{
+			name:            "extract-token with extra args errors",
+			imagePaths:      []string{"extract-token", "extra"},
+			wantErrContains: "does not take positional arguments",
+		},
+		{
+			name:            "check-token with extra args errors",
+			imagePaths:      []string{"check-token", "extra"},
+			wantErrContains: "does not take positional arguments",
+		},
+		{
+			name:            "extract-token with token flag errors",
+			imagePaths:      []string{"extract-token"},
+			tokenFlag:       "abc123",
+			wantErrContains: "--token cannot be combined",
+		},
+		{
+			name:           "non-subcommand remains upload mode",
+			imagePaths:     []string{"image.png"},
+			wantSubcommand: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotSubcommand, err := classifySubcommand(tc.imagePaths, tc.firstPosAfterDoubleDash, tc.tokenFlag)
+			if tc.wantErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrContains)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrContains, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotSubcommand != tc.wantSubcommand {
+				t.Fatalf("expected subcommand %q, got %q", tc.wantSubcommand, gotSubcommand)
+			}
+		})
+	}
 }

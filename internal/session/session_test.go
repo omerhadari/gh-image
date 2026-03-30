@@ -67,6 +67,41 @@ func TestCheckValidity_NetworkError(t *testing.T) {
 	}
 }
 
+func TestCheckValidity_NilCookie(t *testing.T) {
+	_, err := CheckValidity(nil)
+	if err == nil {
+		t.Fatal("expected error for nil cookie, got nil")
+	}
+	if !strings.Contains(err.Error(), "required") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCheckValidity_EmptyCookieValue(t *testing.T) {
+	_, err := CheckValidity(&http.Cookie{Name: "user_session", Value: ""})
+	if err == nil {
+		t.Fatal("expected error for empty cookie value, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCheckValidity_UnexpectedStatus(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	_, err := checkValidityWithURL(srv.Client(), srv.URL+"/settings/profile", "testtoken")
+	if err == nil {
+		t.Fatal("expected error for unexpected status, got nil")
+	}
+	if !strings.Contains(err.Error(), "unexpected status while validating token") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 // checkValidityWithURL is a testable variant of CheckValidity that accepts an
 // injected HTTP client and a custom URL, so tests can use httptest servers.
 func checkValidityWithURL(httpClient *http.Client, targetURL, tokenValue string) (string, error) {
@@ -119,8 +154,13 @@ func checkValidityWithURL(httpClient *http.Client, targetURL, tokenValue string)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Continue below to parse body.
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		return "", fmt.Errorf("token is invalid or expired (status %d)", resp.StatusCode)
+	default:
+		return "", fmt.Errorf("unexpected status while validating token: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)

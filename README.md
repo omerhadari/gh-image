@@ -78,7 +78,7 @@ The tool supports providing your own session token instead of reading from the b
 **Token resolution order (highest priority first):**
 
 1. `--token <value>` flag
-2. `GH_IMAGE_TOKEN` environment variable
+2. `GH_SESSION_TOKEN` environment variable
 3. Browser cookie extraction (default)
 
 ```bash
@@ -86,11 +86,11 @@ The tool supports providing your own session token instead of reading from the b
 gh image --token "$MY_TOKEN" screenshot.png --repo owner/repo
 
 # Use a token via environment variable (preferred on shared machines)
-GH_IMAGE_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
+GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 ```
 
 > **Security note:** `--token` values are visible in process listings (`ps aux`).
-> Use the `GH_IMAGE_TOKEN` environment variable on shared machines.
+> Use the `GH_SESSION_TOKEN` environment variable on shared machines.
 
 > **Warning:** `user_session` cookies grant full account access — they are not
 > scoped like personal access tokens. Treat them with the same care as a password.
@@ -112,14 +112,14 @@ TOKEN=$(gh image extract-token)
 
 ### `check-token`
 
-Verifies that a session token is valid and prints the authenticated GitHub username to stdout. Exit code 0 means valid, exit code 1 means invalid or an error occurred.
+Verifies that a session token is valid and, on a best-effort basis, prints the authenticated GitHub username to stdout. Exit code 0 means valid, exit code 1 means invalid or an error occurred. Username output may be empty even when the token is valid (for example, if the `<meta name="user-login">` tag is missing or cannot be parsed), so rely on the exit code for validity checks.
 
 ```bash
 # Check token from flag
 gh image check-token --token "$MY_TOKEN"
 
 # Check token from environment variable
-GH_IMAGE_TOKEN="$MY_TOKEN" gh image check-token
+GH_SESSION_TOKEN="$MY_TOKEN" gh image check-token
 
 # Check token from browser (default)
 gh image check-token
@@ -138,7 +138,7 @@ USERNAME=$(gh image check-token --token "$MY_TOKEN")
    ```bash
    gh image extract-token
    ```
-2. Add the output as a repository secret named `GH_IMAGE_TOKEN` in your GitHub repository settings.
+2. Add the output as a repository secret named `GH_SESSION_TOKEN` in your GitHub repository settings.
 
 ### Example GitHub Actions workflow
 
@@ -146,14 +146,14 @@ USERNAME=$(gh image check-token --token "$MY_TOKEN")
 - name: Upload screenshots
   env:
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}         # Required for gh CLI auth
-    GH_IMAGE_TOKEN: ${{ secrets.GH_IMAGE_TOKEN }} # GitHub session token
+    GH_SESSION_TOKEN: ${{ secrets.GH_SESSION_TOKEN }} # GitHub session token
   run: |
     gh extension install drogers0/gh-image
     gh image --repo owner/repo screenshot.png
 ```
 
 > **Note:** `gh` CLI must be authenticated (via `GH_TOKEN` or equivalent) for
-> extension installation and repository ID lookup. `GH_IMAGE_TOKEN` is the
+> extension installation and repository ID lookup. `GH_SESSION_TOKEN` is the
 > session token used for the image upload itself.
 
 ### Validate token before upload
@@ -161,13 +161,13 @@ USERNAME=$(gh image check-token --token "$MY_TOKEN")
 ```yaml
 - name: Validate session token
   env:
-    GH_IMAGE_TOKEN: ${{ secrets.GH_IMAGE_TOKEN }}
+    GH_SESSION_TOKEN: ${{ secrets.GH_SESSION_TOKEN }}
   run: gh image check-token
 
 - name: Upload screenshots
   env:
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    GH_IMAGE_TOKEN: ${{ secrets.GH_IMAGE_TOKEN }}
+    GH_SESSION_TOKEN: ${{ secrets.GH_SESSION_TOKEN }}
   run: |
     gh extension install drogers0/gh-image
     gh image --repo owner/repo screenshot.png
@@ -187,7 +187,7 @@ USERNAME=$(gh image check-token --token "$MY_TOKEN")
 
 - A supported browser with an active GitHub session (for local use)
 - Write access to the target repository
-- For CI: a valid `GH_IMAGE_TOKEN` secret (see [CI/CD Usage](#cicd-usage))
+- For CI: a valid `GH_SESSION_TOKEN` secret (see [CI/CD Usage](#cicd-usage))
 
 ## Limitations
 

@@ -22,6 +22,7 @@ func main() {
 	var repoSet bool
 	var tokenFlag string
 	var imagePaths []string
+	var firstPosAfterDoubleDash bool
 
 	// Manual arg parsing so flags can appear anywhere (before or after positional args).
 	args := os.Args[1:]
@@ -31,6 +32,9 @@ func main() {
 
 		// After "--", everything is a positional arg
 		if flagsDone {
+			if len(imagePaths) == 0 {
+				firstPosAfterDoubleDash = true
+			}
 			imagePaths = append(imagePaths, arg)
 			continue
 		}
@@ -76,9 +80,9 @@ func main() {
 			fmt.Println("Flags:")
 			fmt.Println("  --repo owner/repo   GitHub repository (optional)")
 			fmt.Println("  --token <value>     GitHub session token (default: extracted from browser)")
-			fmt.Println("                      Can also be set via GH_IMAGE_TOKEN environment variable")
+			fmt.Println("                      Can also be set via GH_SESSION_TOKEN environment variable")
 			fmt.Println("                      WARNING: --token values are visible in process listings.")
-			fmt.Println("                      Prefer GH_IMAGE_TOKEN on shared machines.")
+			fmt.Println("                      Prefer GH_SESSION_TOKEN on shared machines.")
 			fmt.Println()
 			fmt.Println("Subcommands:")
 			fmt.Println("  extract-token       Extract session token from browser and print to stdout")
@@ -100,17 +104,19 @@ func main() {
 	}
 
 	// Dispatch subcommands before any other validation.
-	if len(imagePaths) > 0 {
-		switch imagePaths[0] {
-		case "extract-token":
-			if tokenFlag != "" {
-				fmt.Fprintf(os.Stderr, "Error: --token cannot be combined with extract-token (extract-token always reads from browser)\n")
-				os.Exit(1)
-			}
-			handleExtractToken()
-		case "check-token":
-			handleCheckToken(tokenFlag)
+	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag)
+	if dispatchErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", dispatchErr)
+		if strings.Contains(dispatchErr.Error(), "does not take positional arguments") {
+			fmt.Fprintf(os.Stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
 		}
+		os.Exit(1)
+	}
+	switch subcommand {
+	case "extract-token":
+		handleExtractToken()
+	case "check-token":
+		handleCheckToken(tokenFlag)
 	}
 
 	if len(imagePaths) == 0 {
@@ -172,18 +178,43 @@ func main() {
 	}
 }
 
+// classifySubcommand identifies whether the parsed positional args represent a
+// supported subcommand invocation and validates subcommand-specific constraints.
+func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, tokenFlag string) (string, error) {
+	if len(imagePaths) == 0 || firstPosAfterDoubleDash {
+		return "", nil
+	}
+	switch imagePaths[0] {
+	case "extract-token":
+		if len(imagePaths) > 1 {
+			return "", fmt.Errorf("extract-token does not take positional arguments")
+		}
+		if tokenFlag != "" {
+			return "", fmt.Errorf("--token cannot be combined with extract-token (extract-token always reads from browser)")
+		}
+		return "extract-token", nil
+	case "check-token":
+		if len(imagePaths) > 1 {
+			return "", fmt.Errorf("check-token does not take positional arguments")
+		}
+		return "check-token", nil
+	default:
+		return "", nil
+	}
+}
+
 // resolveSessionCookie returns a GitHub session cookie using the first available
-// source: --token flag, GH_IMAGE_TOKEN environment variable, or browser extraction.
+// source: --token flag, GH_SESSION_TOKEN environment variable, or browser extraction.
 func resolveSessionCookie(tokenFlag string) (*http.Cookie, error) {
 	if tokenFlag != "" {
 		return cookieFromValue(tokenFlag)
 	}
-	if env := os.Getenv("GH_IMAGE_TOKEN"); env != "" {
+	if env := os.Getenv("GH_SESSION_TOKEN"); env != "" {
 		return cookieFromValue(env)
 	}
 	cookie, err := cookies.GetGitHubSession()
 	if err != nil {
-		return nil, fmt.Errorf("no session token found (set --token flag or GH_IMAGE_TOKEN env var, or log into GitHub in a supported browser): %w", err)
+		return nil, fmt.Errorf("no session token found (set --token flag or GH_SESSION_TOKEN env var, or log into GitHub in a supported browser): %w", err)
 	}
 	return cookie, nil
 }
@@ -234,4 +265,3 @@ func handleCheckToken(tokenFlag string) {
 	fmt.Println(username)
 	os.Exit(0)
 }
-

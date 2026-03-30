@@ -20,6 +20,13 @@ var userLoginRe = regexp.MustCompile(`<meta name="user-login" content="([^"]+)"`
 //   - username → stdout
 //   - status message → stderr
 func CheckValidity(sessionCookie *http.Cookie) (string, error) {
+	if sessionCookie == nil {
+		return "", fmt.Errorf("session cookie is required")
+	}
+	if sessionCookie.Value == "" {
+		return "", fmt.Errorf("session token is empty")
+	}
+
 	// cookiejar.New only errors when Options is non-nil and has an invalid
 	// PublicSuffixList; passing nil is always safe.
 	jar, _ := cookiejar.New(nil)
@@ -50,8 +57,13 @@ func CheckValidity(sessionCookie *http.Cookie) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Continue below to parse the response body.
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		return "", fmt.Errorf("token is invalid or expired (status %d)", resp.StatusCode)
+	default:
+		return "", fmt.Errorf("unexpected status while validating token: %d", resp.StatusCode)
 	}
 
 	// Best-effort username extraction from the 200 response body.
