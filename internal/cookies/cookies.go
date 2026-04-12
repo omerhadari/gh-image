@@ -1,6 +1,7 @@
 package cookies
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha1"
@@ -14,16 +15,54 @@ import (
 	"strings"
 	"time"
 
+	"github.com/browserutils/kooky"
+	_ "github.com/browserutils/kooky/browser/brave"
+	_ "github.com/browserutils/kooky/browser/chrome"
+	_ "github.com/browserutils/kooky/browser/chromium"
+	_ "github.com/browserutils/kooky/browser/edge"
 	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/pbkdf2"
 )
 
-// GetGitHubSession returns the user_session cookie for github.com
-// from the Helium browser. Reads only this one specific cookie.
+// GetGitHubSession returns the user_session cookie for github.com.
+// Tries kooky (Chrome, Brave, Edge, Chromium) first, then falls back
+// to reading Helium's cookie store directly.
 func GetGitHubSession() (*http.Cookie, error) {
+	// Try standard browsers via kooky
+	cookie, err := getViaKooky()
+	if err == nil {
+		return cookie, nil
+	}
+
+	// Fall back to Helium
+	cookie, heliumErr := getFromHelium()
+	if heliumErr == nil {
+		return cookie, nil
+	}
+
+	return nil, fmt.Errorf("kooky: %w; helium: %w", err, heliumErr)
+}
+
+func getViaKooky() (*http.Cookie, error) {
+	ctx := context.Background()
+	cookies, err := kooky.ReadCookies(ctx,
+		kooky.Valid,
+		kooky.DomainHasSuffix("github.com"),
+		kooky.Name("user_session"),
+	)
+	if len(cookies) > 0 {
+		return &cookies[0].Cookie, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading browser cookies: %w", err)
+	}
+	return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser")
+}
+
+func getFromHelium() (*http.Cookie, error) {
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
-		return nil, fmt.Errorf("getting config dir: %w", err)
+		return nil, err
 	}
 	cookiePath := filepath.Join(cfgDir, "net.imput.helium", "Default", "Cookies")
 	if _, err := os.Stat(cookiePath); err != nil {
@@ -39,7 +78,7 @@ func GetGitHubSession() (*http.Cookie, error) {
 
 	data, err := os.ReadFile(cookiePath)
 	if err != nil {
-		return nil, fmt.Errorf("reading cookie file: %w", err)
+		return nil, err
 	}
 	if err := os.WriteFile(tmp.Name(), data, 0600); err != nil {
 		return nil, err
@@ -47,7 +86,7 @@ func GetGitHubSession() (*http.Cookie, error) {
 
 	db, err := sql.Open("sqlite", tmp.Name())
 	if err != nil {
-		return nil, fmt.Errorf("opening cookie db: %w", err)
+		return nil, err
 	}
 	defer db.Close()
 
@@ -64,12 +103,12 @@ func GetGitHubSession() (*http.Cookie, error) {
 	var expiresUTC int64
 	var isSecure, isHTTPOnly int
 	if err := row.Scan(&hostKey, &encryptedValue, &cookiePath2, &expiresUTC, &isSecure, &isHTTPOnly); err != nil {
-		return nil, fmt.Errorf("no github.com user_session cookie found in Helium — are you logged in? (%w)", err)
+		return nil, fmt.Errorf("no github.com user_session cookie in Helium (%w)", err)
 	}
 
 	value, err := tryDecrypt(encryptedValue, hostKey)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting cookie: %w", err)
+		return nil, err
 	}
 
 	expires := time.Date(1601, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(expiresUTC) * time.Microsecond)
@@ -135,7 +174,6 @@ func decryptCookie(encrypted, password []byte, hostKey string) (string, error) {
 	encrypted = encrypted[3:]
 
 	key := pbkdf2.Key(password, []byte("saltysalt"), 1003, 16, sha1.New)
-
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
