@@ -6,12 +6,32 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
+func validateUploadURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid upload URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("upload URL must be HTTPS, got %s", u.Scheme)
+	}
+	if !strings.HasSuffix(u.Host, ".s3.amazonaws.com") {
+		return fmt.Errorf("upload URL host %q is not a known GitHub S3 bucket", u.Host)
+	}
+	return nil
+}
+
 // uploadToS3 uploads the file to S3 using the presigned form fields from the policy.
 func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) error {
+	if err := validateUploadURL(policy.UploadURL); err != nil {
+		return err
+	}
+
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
