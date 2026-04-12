@@ -8,8 +8,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,22 +37,28 @@ type policyResponse struct {
 	AssetUploadAuthenticityToken string            `json:"asset_upload_authenticity_token"`
 }
 
-// NewClient creates an http.Client with the GitHub session cookies set.
-// GitHub requires both user_session and __Host-user_session_same_site
-// for CSRF validation on the upload endpoint.
-func NewClient(sessionCookie *http.Cookie) *http.Client {
-	jar, _ := cookiejar.New(nil)
-	ghURL, _ := url.Parse("https://github.com")
-	sameSiteCookie := &http.Cookie{
-		Name:     "__Host-user_session_same_site",
-		Value:    sessionCookie.Value,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
+// cookieTransport injects session cookies on every github.com request.
+// Go's cookiejar rejects __Host- prefixed cookies, so we bypass it.
+type cookieTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (t *cookieTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == "github.com" {
+		req.AddCookie(&http.Cookie{Name: "user_session", Value: t.token})
+		req.AddCookie(&http.Cookie{Name: "__Host-user_session_same_site", Value: t.token})
 	}
-	jar.SetCookies(ghURL, []*http.Cookie{sessionCookie, sameSiteCookie})
-	return &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	return t.base.RoundTrip(req)
+}
+
+// NewClient creates an http.Client with GitHub session cookies injected
+// via a custom transport (cookiejar rejects __Host- prefixed cookies).
+func NewClient(sessionCookie *http.Cookie) *http.Client {
+	return &http.Client{
+		Transport: &cookieTransport{token: sessionCookie.Value, base: http.DefaultTransport},
+		Timeout:   30 * time.Second,
+	}
 }
 
 // Upload uploads an image file to GitHub and returns the asset URL.
