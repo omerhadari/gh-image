@@ -19,3 +19,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+gh-image
+darwin-*
+linux-*
+windows-*
