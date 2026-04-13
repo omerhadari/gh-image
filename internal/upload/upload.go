@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -205,8 +206,22 @@ func finalizeUpload(client *http.Client, owner, repo string, policy *policyRespo
 	}, nil
 }
 
+// extOverrides forces the correct mime type for container formats that
+// Go's stdlib mime map gets wrong. .webm in particular is registered as
+// audio/webm, which makes GitHub render the asset as an audio player
+// instead of a video player.
+var extOverrides = map[string]string{
+	".webm": "video/webm",
+	".mkv":  "video/x-matroska",
+	".mov":  "video/quicktime",
+	".m4v":  "video/mp4",
+}
+
 func detectContentType(path string) string {
-	ext := filepath.Ext(path)
+	ext := strings.ToLower(filepath.Ext(path))
+	if override, ok := extOverrides[ext]; ok {
+		return override
+	}
 	ct := mime.TypeByExtension(ext)
 	if ct != "" {
 		return ct
